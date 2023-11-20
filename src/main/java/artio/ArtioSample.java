@@ -19,8 +19,6 @@ import uk.co.real_logic.artio.messages.DisconnectReason;
 import uk.co.real_logic.artio.messages.FixMessageDecoder;
 import uk.co.real_logic.artio.session.Session;
 
-import java.util.concurrent.Executors;
-
 import static io.aeron.CommonContext.IPC_CHANNEL;
 import static io.aeron.archive.client.AeronArchive.Configuration.CONTROL_CHANNEL_PROP_NAME;
 import static io.aeron.archive.client.AeronArchive.Configuration.CONTROL_RESPONSE_CHANNEL_PROP_NAME;
@@ -30,7 +28,7 @@ import static java.util.Collections.singletonList;
 
 public class ArtioSample {
 
-    private static final String AERON_DIR_NAME = "client-aeron";
+    public static final String AERON_DIR_NAME = "client-aeron";
     private static final String ARCHIVE_DIR_NAME = "client-aeron-archive";
     private static final String CONTROL_REQUEST_CHANNEL = "aeron:udp?endpoint=localhost:7010";
     private static final String CONTROL_RESPONSE_CHANNEL = "aeron:udp?endpoint=localhost:7020";
@@ -67,16 +65,10 @@ public class ArtioSample {
 
         archiveContext
                 .controlChannel(CONTROL_REQUEST_CHANNEL)
-                .recordingEventsChannel(RECORDING_EVENTS_CHANNEL);
+                .replicationChannel("aeron:udp?endpoint=localhost:0");
 
         try (ArchivingMediaDriver driver = ArchivingMediaDriver.launch(context, archiveContext)) {
-            try (FixEngine ignore = FixEngine.launch(configuration)) {
-                final SessionConfiguration sessionConfig = SessionConfiguration.builder()
-                        .address("localhost", 9999)
-                        .targetCompId("TEST_TARGET")
-                        .senderCompId("TEST_SENDER")
-                        .build();
-
+            try (FixEngine engine = FixEngine.launch(configuration)) {
                 final SleepingIdleStrategy idleStrategy = new SleepingIdleStrategy(100);
 
                 final LibraryConfiguration libraryConfiguration = new LibraryConfiguration()
@@ -86,26 +78,16 @@ public class ArtioSample {
                 libraryConfiguration.aeronContext()
                         .aeronDirectoryName(AERON_DIR_NAME);
                 try (FixLibrary library = blockingConnect(libraryConfiguration)) {
-                    final Session session = LibraryUtil.initiate(
-                            library,
-                            sessionConfig,
-                            10_000,
-                            idleStrategy);
-
-                    while (!session.canSendMessage()) {
-                        idleStrategy.idle(library.poll(1));
-                    }
-
                     AgentRunner sessionAgent = new AgentRunner(
                             idleStrategy,
                             e -> {
                             },
                             null,
-                            new SessionAgent(library, idleStrategy, session)
+                            new SessionAgent(library, idleStrategy)
                     );
                     AgentRunner.startOnThread(sessionAgent);
 
-                    Executors.newSingleThreadExecutor().execute(ArtioSample::scanArchive);
+//                    Executors.newSingleThreadExecutor().execute(ArtioSample::scanArchive);
 
                     while (true) {
                         Thread.yield();
@@ -133,11 +115,14 @@ public class ArtioSample {
                     true,
                     EngineConfiguration.DEFAULT_ARCHIVE_SCANNER_STREAM
             );
+        } catch(Exception e) {
+            System.err.println(e);
         }
         System.out.println("End of Scanning");
     }
 
     private static void onMessage(FixMessageDecoder fixMessageDecoder, DirectBuffer directBuffer, int i, int i1, ArtioLogHeader artioLogHeader) {
+        System.out.println("new message");
         System.out.println(fixMessageDecoder.body());
     }
 
